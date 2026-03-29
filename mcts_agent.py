@@ -3,6 +3,11 @@ import random
 import time
 import copy
 from heuristic_agent import move_score
+# ─────────────────────────────────────────
+#  实验调参区
+# ─────────────────────────────────────────
+EXPERIMENT_C = 1.41         # 测试目标：调整 UCB 探索常数 (比如 0.5, 1.41, 2.0)
+USE_HEURISTIC = True      # 测试目标：True 为启发式 Rollout，False 为纯随机 Rollout
 
 
 def heuristic_adapter(game_state_obj: 'GameState') -> float:
@@ -79,9 +84,9 @@ def heuristic_adapter(game_state_obj: 'GameState') -> float:
     normalized_score = 1.0 / (1.0 + math.exp(-best_raw_score / 30.0))
 
     # 调试打印：每 50 轮打印一次，避免刷屏太快
-    if game_state_obj.turn % 10 == 0:
-        print(
-            f"[Evaluation] Turn: {game_state_obj.turn} | Raw: {best_raw_score:.2f} | Normalized: {normalized_score:.4f}")
+    # if game_state_obj.turn % 10 == 0:
+    #     print(
+    #         f"[Evaluation] Turn: {game_state_obj.turn} | Raw: {best_raw_score:.2f} | Normalized: {normalized_score:.4f}")
     return normalized_score
 
 # ─────────────────────────────────────────
@@ -305,7 +310,11 @@ class MCTS:
             self._backpropagate(node, result)
             count += 1
 
-        print(f"MCTS iterations completed: {count}")
+        # print(f"MCTS iterations completed: {count}")
+        # 👇 新增这块：把迭代次数追加写入本地文件
+        with open("mcts_iters.txt", "a") as f:
+            f.write(f"{count}\n")
+
         # 选访问次数最多的子节点
         if not root.children:  # 极端情况保底
             return random.choice(root_state.get_safe_moves(root_state.my_id))
@@ -358,7 +367,9 @@ class MCTS:
 # ─────────────────────────────────────────
 # 4. 接入 BattleSnake API
 # ─────────────────────────────────────────
-mcts = MCTS(time_limit=0.8, heuristic_fn=heuristic_adapter)
+# 根据开关，决定是传入评估函数，还是传入 None (纯随机)
+active_heuristic = heuristic_adapter if USE_HEURISTIC else None
+mcts = MCTS(time_limit=0.8, c=EXPERIMENT_C, heuristic_fn=active_heuristic)
 
 
 def info():
@@ -392,10 +403,10 @@ def move(game_state: dict) -> dict:
     # 调用 MCTS 搜索最佳动作
     try:
         best_move = mcts.search(state)
-        print(f"TURN {game_state['turn']} | MCTS move: {best_move}")
+        # print(f"TURN {game_state['turn']} | MCTS move: {best_move}")
         return {"move": best_move}
     except Exception as e:
-        print(f"MCTS Error: {e}")
+        # print(f"MCTS Error: {e}")
         return {"move": random.choice(safe)}  # 出错保底
 
 
