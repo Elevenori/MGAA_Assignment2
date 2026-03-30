@@ -1,5 +1,5 @@
-Agent,ELO,Wins,Win_Rate,Avg_Turns
-OpponentModel,1234.97,65,65.0,116.6
-Heuristic,1029.39,14,14.0,116.6
-VanillaMCTS,931.3,9,9.0,116.6
-RAVE,804.34,6,6.0,116.6
+Agent,ELO,Wins,Win_Rate
+OpponentModel,1336.76,65,65.0
+VanillaMCTS,956.78,14,14.0
+RAVE,924.49,14,14.0
+Heuristic,781.97,7,7.0
