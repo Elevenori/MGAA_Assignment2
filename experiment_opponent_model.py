@@ -7,9 +7,9 @@ C may be smaller than or equal to 0.5.
 
 Usage:
     Terminal 1: python mcts_opponent_model.py   (port 8000) <- restart for each C
-    Terminal 2: PORT=8001 python heuristic_agent.py
-    Terminal 3: PORT=8002 python heuristic_agent.py
-    Terminal 4: PORT=8003 python heuristic_agent.py
+    Terminal 2: PORT=8001 python mcts_agent.py
+    Terminal 3: PORT=8002 python mcts_agent.py
+    Terminal 4: PORT=8003 python mcts_agent.py
     Terminal 5: python experiment_opponent_model.py
 """
 
