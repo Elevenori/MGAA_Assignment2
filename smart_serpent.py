@@ -2,7 +2,6 @@ import math
 import random
 import time
 import copy
-from heuristic_agent import move_score
 
 
 # Experiment Parameters
