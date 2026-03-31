@@ -1,29 +1,5 @@
 """
 MCTS with RAVE + poolRave improvement
-======================================
-忠实实现论文：
-    Rimmel, Teytaud & Teytaud (2010)
-    "Biasing Monte-Carlo Simulations through RAVE Values"
-
-Algorithm 1 (Right) — RMCTS(s):
-
-选择阶段：
-    s' ← argmax_{j∈C_s'} [ x̄_j + α·x̄^RAVE_{s',j} + √(2ln(n_s')/n_j) ]
-
-模拟阶段 (poolRave)：
-    s'' ← 树中最后一个访问次数 ≥ MIN_SIMS 的节点
-    while s' 不是终态:
-        if Random < p:
-            s' ← 从 s'' 中 RAVE 值最好的 pool_size 个动作里随机选一个
-        else:
-            s' ← mc(s')   # 随机走
-
-反向传播：
-    同时更新普通统计 (n_s, x̄_s) 和 RAVE 统计 (n^RAVE, x̄^RAVE)
-
-可调超参数（论文实验范围）：
-    p         : 使用 RAVE 动作的概率    论文测试: 1/4, 1/2, 3/4, 1
-    pool_size : 从前 k 个 RAVE 动作选  论文测试: 5, 10, 20, 30, 60
 """
 
 import math
@@ -32,21 +8,17 @@ import time
 import copy
 from heuristic_agent import move_score
 
-# ─────────────────────────────────────────
-#  实验调参区（论文参数）
-# ─────────────────────────────────────────
-EXPERIMENT_C    = 0.5   # UCB 探索系数（沿用 vanilla 最优值）
-EXPERIMENT_P    = 0.25   # poolRave 概率：以此概率使用 RAVE 动作（论文最优 1/2）
-EXPERIMENT_POOL = 10    # pool size：从前 k 个 RAVE 动作中随机选（论文最优 10）
-MIN_SIMS        = 50    # 论文固定值：节点至少有多少次模拟才能提供 RAVE 参考
-USE_HEURISTIC   = True  # True = 启发式评估终态，False = 简单评估
+#  Experiment Parameters (hyperparameters from paper "Biasing Monte-Carlo Simulations through RAVE Values")
+EXPERIMENT_C    = 0.5   # UCB exploration constant
+EXPERIMENT_P    = 0.25   # poolRave probability
+EXPERIMENT_POOL = 10    # pool size: sample from top-k RAVE moves
+MIN_SIMS        = 50    # minimum simulations for a node to serve as RAVE reference
+USE_HEURISTIC   = True
 
 
-# ─────────────────────────────────────────
-#  启发式适配器（我方终态评估）
-# ─────────────────────────────────────────
+#  Heuristic adapter
 def heuristic_adapter(game_state_obj: 'GameState') -> float:
-    """调用队友 move_score，Sigmoid 归一化到 (0,1)"""
+
     my_snake = game_state_obj.snakes.get(game_state_obj.my_id)
     if not my_snake or not my_snake["alive"]:
         return -1.0
@@ -103,9 +75,7 @@ def heuristic_adapter(game_state_obj: 'GameState') -> float:
     return 1.0 / (1.0 + math.exp(-best_raw / 30.0))
 
 
-# ─────────────────────────────────────────
-# 1. 游戏状态模拟
-# ─────────────────────────────────────────
+# Game State Simulation
 class GameState:
     def __init__(self, game_state: dict, my_id: str):
         self.board_width  = game_state["board"]["width"]
@@ -224,9 +194,7 @@ class GameState:
         return 0.1
 
 
-# ─────────────────────────────────────────
-# 2. MCTS 节点（含 RAVE 统计）
-# ─────────────────────────────────────────
+# MCTS Node
 class MCTSNode:
     def __init__(self, state: GameState, parent=None, move=None):
         self.state    = state
@@ -237,9 +205,8 @@ class MCTSNode:
         self.value    = 0.0
         self.untried  = state.get_safe_moves(state.my_id)
 
-        # 论文符号：n^RAVE_{s,a} 和 x̄^RAVE_{s,a}
-        self.rave_total  = {}   # 累计得分
-        self.rave_visits = {}   # 访问次数
+        self.rave_total  = {}   # cumulative score
+        self.rave_visits = {}   # visit count
 
     def is_fully_expanded(self):
         return len(self.untried) == 0
@@ -252,18 +219,10 @@ class MCTSNode:
         return self.rave_total.get(move, 0.0) / n
 
     def alpha(self) -> float:
-        """
-        α 随访问次数趋向 0（论文描述，具体公式参考 Gelly & Silver 2007）
-        k_eq=300：访问约 100 次时 α≈0.71，访问 1000 次时 α≈0.30
-        """
         k_eq = 300
         return math.sqrt(k_eq / (3.0 * max(self.visits, 1) + k_eq))
 
     def ucb_rave(self, c: float) -> float:
-        """
-        论文选择公式（Algorithm 1 Right, Descent）：
-        x̄_j + α·x̄^RAVE_{s,j} + √(2ln(n_s) / n_j)
-        """
         if self.visits == 0:
             return float("inf")
 
@@ -280,26 +239,12 @@ class MCTSNode:
         return max(self.children, key=lambda n: n.ucb_rave(c))
 
     def top_k_rave_moves(self, k: int, safe_moves: list) -> list:
-        """
-        论文 poolRave：返回合法动作中 RAVE 值最好的前 k 个。
-        论文原文："one of the k moves with best RAVE value in s''"
-        """
         scored = sorted(safe_moves, key=lambda m: self.rave_avg(m), reverse=True)
         return scored[:k] if len(scored) >= k else scored
 
 
-# ─────────────────────────────────────────
-# 3. MCTS-poolRave 主算法
-# ─────────────────────────────────────────
+# MCTS-poolRave 主算法
 class MCTS_PoolRave:
-    """
-    忠实实现论文 Algorithm 1 (Right) —— RMCTS with poolRave
-
-    超参数（论文实验范围）：
-        p         : 1/4, 1/2, 3/4, 1     论文最优 p=1/2
-        pool_size : 5, 10, 20, 30, 60    论文最优 pool_size=10
-    """
-
     def __init__(self, time_limit=0.8, c=0.5,
                  p=0.5, pool_size=10, heuristic_fn=None):
         self.time_limit   = time_limit
@@ -320,7 +265,7 @@ class MCTS_PoolRave:
                 node = self._expand(node)
                 path.append(node)
 
-            # 论文：找路径上最后一个访问次数 ≥ MIN_SIMS 的节点
+
             rave_ref = self._find_rave_reference(path)
 
             result, sim_moves = self._simulate(node.state, rave_ref)
@@ -336,7 +281,6 @@ class MCTS_PoolRave:
         best = max(root.children, key=lambda n: n.visits)
         return best.move
 
-    # ── ① 选择 ────────────────────────────────────────────────────────────────
     def _select(self, node: MCTSNode):
         path = [node]
         while not node.state.is_terminal():
@@ -346,7 +290,6 @@ class MCTS_PoolRave:
             path.append(node)
         return node, path
 
-    # ── ② 扩展 ────────────────────────────────────────────────────────────────
     def _expand(self, node: MCTSNode) -> MCTSNode:
         move = node.untried.pop()
         moves = {
@@ -360,29 +303,14 @@ class MCTS_PoolRave:
         node.children.append(child)
         return child
 
-    # ── 找 RAVE 参考节点 ───────────────────────────────────────────────────────
     def _find_rave_reference(self, path: list) -> MCTSNode:
-        """
-        论文原文：
-        s'' ← last visited node in the tree with at least 50 simulations
-        """
         for node in reversed(path):
             if node.visits >= MIN_SIMS:
                 return node
         return path[0]
 
-    # ── ③ 模拟（poolRave 核心）──────────────────────────────────────────────
     def _simulate(self, state: GameState,
                   rave_ref: MCTSNode, max_depth=20):
-        """
-        论文 poolRave 模拟（Algorithm 1 Right, Evaluation）：
-
-        while s' 不是终态:
-            if Random < p:
-                s' ← 从 rave_ref 的 top-k RAVE 动作里随机选一个
-            else:
-                s' ← mc(s')
-        """
         sim_state     = copy.deepcopy(state)
         my_moves_used = []
 
@@ -399,11 +327,11 @@ class MCTS_PoolRave:
 
                 if sid == sim_state.my_id:
                     if random.random() < self.p:
-                        # poolRave：从 top-k RAVE 动作中随机均匀选一个
+                        # poolRave: sample uniformly from top-k RAVE moves
                         top_k  = rave_ref.top_k_rave_moves(self.pool_size, safe)
                         chosen = random.choice(top_k)
                     else:
-                        # 正常随机 mc(s')
+                        # Standard random rollout mc(s')
                         chosen = random.choice(safe)
 
                     my_moves_used.append(chosen)
@@ -416,13 +344,8 @@ class MCTS_PoolRave:
         result = sim_state.evaluate(self.heuristic_fn)
         return result, my_moves_used
 
-    # ── ④ 反向传播 ─────────────────────────────────────────────────────────────
     def _backpropagate(self, node: MCTSNode,
                        result: float, sim_moves: list):
-        """
-        论文 Growth 阶段（Algorithm 1 Right）：
-        同时更新普通统计和 RAVE 统计
-        """
         current = node
         while current is not None:
             current.visits += 1
@@ -433,9 +356,6 @@ class MCTS_PoolRave:
             current = current.parent
 
 
-# ─────────────────────────────────────────
-# 4. 接入 BattleSnake API
-# ─────────────────────────────────────────
 active_heuristic = heuristic_adapter if USE_HEURISTIC else None
 mcts_poolrave = MCTS_PoolRave(
     time_limit   = 0.8,

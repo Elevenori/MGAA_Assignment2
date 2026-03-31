@@ -4,22 +4,15 @@ import time
 import copy
 from heuristic_agent import move_score
 
-# ─────────────────────────────────────────
-#  实验调参区
-# ─────────────────────────────────────────
-EXPERIMENT_C  = 0.5    # UCB 探索系数
-USE_HEURISTIC = True   # True = 启发式 Rollout，False = 纯随机 Rollout
+
+# Experiment Parameters
+EXPERIMENT_C  = 0.3    # UCB exploration constant
+USE_HEURISTIC = True   # True = heuristic state evaluation, False = simple evaluation
 
 
-# ─────────────────────────────────────────
-#  工具函数：组装 move_score 需要的参数
-# ─────────────────────────────────────────
+#  Helper: build move_score input format
 def _build_raw_state(state: 'GameState', pov_id: str) -> tuple:
-    """
-    把 GameState 对象转换成队友 move_score 需要的格式。
-    返回 (raw_game_state, occupied, hazard_set, opponent_heads)
-    pov_id: 从哪条蛇的视角来评估（自己或对手）
-    """
+
     snake = state.snakes[pov_id]
 
     raw_game_state = {
@@ -65,9 +58,7 @@ def _build_raw_state(state: 'GameState', pov_id: str) -> tuple:
 
 
 def heuristic_adapter(game_state_obj: 'GameState') -> float:
-    """
-    我方状态评估：调用队友 move_score，Sigmoid 归一化到 (0,1)。
-    """
+
     my_snake = game_state_obj.snakes.get(game_state_obj.my_id)
     if not my_snake or not my_snake["alive"]:
         return -1.0
@@ -95,13 +86,7 @@ def heuristic_adapter(game_state_obj: 'GameState') -> float:
 
 
 def opponent_best_move(state: 'GameState', snake_id: str) -> str:
-    """
-    对手建模核心函数：
-    站在对手蛇的视角，用启发式函数预测它最可能选择的动作。
 
-    原理：假设对手也是理性的，会选对自己得分最高的方向，
-         而不是随机乱走。这让 MCTS 的模拟更接近真实对局。
-    """
     safe_moves = state.get_safe_moves(snake_id)
 
     if not safe_moves:
@@ -133,9 +118,7 @@ def opponent_best_move(state: 'GameState', snake_id: str) -> str:
         return random.choice(safe_moves)
 
 
-# ─────────────────────────────────────────
-# 1. 游戏状态模拟
-# ─────────────────────────────────────────
+# 1. Game State Simulation
 class GameState:
     def __init__(self, game_state: dict, my_id: str):
         self.board_width  = game_state["board"]["width"]
@@ -265,9 +248,7 @@ class GameState:
         return 0.1
 
 
-# ─────────────────────────────────────────
-# 2. MCTS 节点
-# ─────────────────────────────────────────
+# 2. MCTS Node
 class MCTSNode:
     def __init__(self, state: GameState, parent=None, move=None):
         self.state    = state
@@ -291,19 +272,8 @@ class MCTSNode:
         return max(self.children, key=lambda n: n.ucb1(c))
 
 
-# ─────────────────────────────────────────
-# 3. MCTS + 对手建模 主算法
-# ─────────────────────────────────────────
+# 3. MCTS with Opponent Modeling
 class MCTS_OpponentModel:
-    """
-    改进点：对手建模（Opponent Modeling）
-
-    vanilla MCTS 里对手随机走，导致模拟质量低。
-    本版本在扩展和模拟阶段，用启发式函数预测 3 条对手蛇
-    最可能的动作，使模拟更接近真实对局，提升决策质量。
-
-    参考：Goodman & Lucas (2020), Świe̊chowski et al. (2022) Section 4.6
-    """
 
     def __init__(self, time_limit=0.8, c=0.5, heuristic_fn=None):
         self.time_limit   = time_limit
@@ -332,7 +302,7 @@ class MCTS_OpponentModel:
         best = max(root.children, key=lambda n: n.visits)
         return best.move
 
-    # ── ① 选择 ────────────────────────────────────────────────────────────────
+    
     def _select(self, node: MCTSNode) -> MCTSNode:
         while not node.state.is_terminal():
             if not node.is_fully_expanded():
@@ -340,7 +310,7 @@ class MCTS_OpponentModel:
             node = node.best_child(self.c)
         return node
 
-    # ── ② 扩展（对手建模在这里生效）──────────────────────────────────────────
+    # expansion, opponent modeling applied here
     def _expand(self, node: MCTSNode) -> MCTSNode:
         move = node.untried.pop()
 
@@ -349,10 +319,10 @@ class MCTS_OpponentModel:
             if not snake["alive"]:
                 continue
             if sid == node.state.my_id:
-                # 我方：用当前要展开的动作
+                # Our snake: use the action being expanded
                 moves[sid] = move
             else:
-                # 对手：用启发式预测最可能的动作（核心改进）
+                # Opponent snakes: predict best move using heuristic
                 moves[sid] = opponent_best_move(node.state, sid)
 
         new_state = node.state.step(moves)
@@ -360,12 +330,9 @@ class MCTS_OpponentModel:
         node.children.append(child)
         return child
 
-    # ── ③ 模拟（对手建模在这里也生效）───────────────────────────────────────
+    # Simulation
     def _simulate(self, state: GameState, max_depth=20) -> float:
-        """
-        Rollout：我方随机走，对手用启发式预测。
-        相比 vanilla（全随机），对手行为更真实，模拟质量更高。
-        """
+
         sim_state = copy.deepcopy(state)
 
         for _ in range(max_depth):
@@ -377,17 +344,14 @@ class MCTS_OpponentModel:
                 if not snake["alive"]:
                     continue
                 if sid == sim_state.my_id:
-                    # 我方：随机（或可换成启发式）
                     moves[sid] = random.choice(sim_state.get_safe_moves(sid))
                 else:
-                    # 对手：启发式预测（核心改进）
                     moves[sid] = opponent_best_move(sim_state, sid)
 
             sim_state = sim_state.step(moves)
 
         return sim_state.evaluate(self.heuristic_fn)
 
-    # ── ④ 反向传播 ─────────────────────────────────────────────────────────────
     def _backpropagate(self, node: MCTSNode, result: float):
         current = node
         while current is not None:
@@ -396,9 +360,7 @@ class MCTS_OpponentModel:
             current = current.parent
 
 
-# ─────────────────────────────────────────
-# 4. 接入 BattleSnake API
-# ─────────────────────────────────────────
+# BattleSnake API
 active_heuristic = heuristic_adapter if USE_HEURISTIC else None
 mcts_om = MCTS_OpponentModel(
     time_limit   = 0.8,
@@ -411,7 +373,7 @@ def info():
     return {
         "apiversion": "1",
         "author":     "",
-        "color":      "#A855F7",    # 紫色，区别于其他 agent
+        "color":      "#A855F7",  #purple
         "head":       "default",
         "tail":       "default",
     }

@@ -17,9 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# ─────────────────────────────────────────
 #  Tournament Configuration
-# ─────────────────────────────────────────
 MATCHES     = 100
 LOG_PATH    = Path("tournament_result.json")
 RESULTS_CSV = "tournament_results.csv"
@@ -43,9 +41,7 @@ CMD_BASE = [
 ]
 
 
-# ─────────────────────────────────────────
 #  ELO System (tracks all snakes)
-# ─────────────────────────────────────────
 class EloSystem:
     def __init__(self, names, k=32):
         self.ratings = {name: 1000.0 for name in names}
@@ -67,9 +63,7 @@ class EloSystem:
         return sorted(self.ratings.items(), key=lambda x: x[1], reverse=True)
 
 
-# ─────────────────────────────────────────
 #  Parse Game Result
-# ─────────────────────────────────────────
 def load_last_state(path: Path):
     if not path.exists():
         return None
@@ -86,9 +80,7 @@ def load_last_state(path: Path):
     return None
 
 
-# ─────────────────────────────────────────
 #  Main Tournament Logic
-# ─────────────────────────────────────────
 def run_tournament():
     names = [s["name"] for s in SNAKES]
     elo   = EloSystem(names)
@@ -136,9 +128,7 @@ def run_tournament():
     return elo, wins, elo_history
 
 
-# ─────────────────────────────────────────
 #  Display Results
-# ─────────────────────────────────────────
 def print_results(elo, wins, matches):
     print("=" * 52)
     print("         Tournament Final Results")
@@ -217,9 +207,7 @@ def plot_results(df, elo_history, matches):
     print("Plot saved to tournament_results.png")
 
 
-# ─────────────────────────────────────────
 #  Entry Point
-# ─────────────────────────────────────────
 if __name__ == "__main__":
     print("Please ensure all 4 snakes are running:")
     for s in SNAKES:
