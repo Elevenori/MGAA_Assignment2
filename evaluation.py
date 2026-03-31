@@ -11,7 +11,7 @@ class EloSystem:
         if winner_name not in self.ratings:
             return
 
-        # 赢家从所有输家身上吸取分数
+        # The winner takes points from all the losers
         for snake in self.ratings:
             if snake == winner_name:
                 continue
@@ -24,7 +24,7 @@ class EloSystem:
 
 def run_tournament(test_agent_name="MCTS_Test", matches=50):
     """
-    运行锦标赛并返回测试蛇的统计数据
+    Run the tournament and return the statistics for the test snake
     """
     snakes_config = [
         {"name": test_agent_name, "url": "http://127.0.0.1:8000"},
@@ -38,7 +38,7 @@ def run_tournament(test_agent_name="MCTS_Test", matches=50):
     wins = {s["name"]: 0 for s in snakes_config}
     wins["Draw/Timeout"] = 0
 
-    # 实验开始前，通过写入空内容清空记录文件
+    # empty the mcts_iters.txt file
     try:
         open("mcts_iters.txt", "w").close()
     except Exception:
@@ -63,6 +63,7 @@ def run_tournament(test_agent_name="MCTS_Test", matches=50):
         for s in snakes_config:
             cmd.extend(["--name", s["name"], "--url", s["url"]])
 
+        # run the game
         subprocess.run(cmd, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
 
@@ -86,7 +87,7 @@ def run_tournament(test_agent_name="MCTS_Test", matches=50):
         if not last_state:
             continue
 
-        turn = last_state.get("turn", 0)
+        turn = last_state.get("turn", 0)  # curretn turn
         mcts_survival_turns.append(turn)
         survivors = last_state["board"]["snakes"]
 
@@ -99,7 +100,7 @@ def run_tournament(test_agent_name="MCTS_Test", matches=50):
 
     print(f"\n All {matches} matches completed!")
 
-    # 读取所有回合的迭代次数并算平均值
+    # calculate average survival turns and average MCTS iterations
     avg_iters = 0
     try:
         with open("mcts_iters.txt", "r") as f:
